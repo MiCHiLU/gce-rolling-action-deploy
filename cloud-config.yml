@@ -1,0 +1,33 @@
+#cloud-config
+
+users:
+- name: cloudservice
+  uid: 2000
+
+write_files:
+- path: /etc/docker/daemon.json
+  content: '{"log-driver":"gcplogs"}'
+
+- path: /etc/systemd/system/sample.service
+  permissions: 0644
+  owner: root
+  content: |
+    [Unit]
+    Description=Start sample container
+    Wants=gcr-online.target
+    After=gcr-online.target
+    [Service]
+    Restart=always
+    Environment="HOME=/home/cloudservice"
+    ExecStartPre=/usr/bin/docker-credential-gcr configure-docker
+    ExecStartPre=/usr/bin/docker pull us.gcr.io/myproject/sample
+    ExecStartPre=-/usr/bin/docker run --rm -u 2000 --name=sample us.gcr.io/myproject/sample version
+    ExecStart=/usr/bin/docker run --rm -u 2000 -p 80:8080 --name=sample us.gcr.io/myproject/sample
+    ExecStop=/usr/bin/docker stop sample
+    ExecStopPost=/usr/bin/docker rm sample
+    ExecStopPost=-/usr/bin/docker run --rm -v /var/run/docker.sock:/var/run/docker.sock zzrot/docker-clean run
+
+runcmd:
+- systemctl daemon-reload
+- systemctl restart docker # for Google Cloud Logging
+- systemctl start sample.service

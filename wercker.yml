@@ -1,0 +1,55 @@
+box: blueoceans/golang
+build:
+  steps:
+  - setup-go-workspace
+  - script:
+      name: go build for production
+      code: |
+        make build
+  - script:
+      name: copy binary to output directory
+      code: |-
+        cp bin/main $WERCKER_OUTPUT_DIR
+gcr:
+  steps:
+  - internal/docker-scratch-push:
+      username: _json_key
+      password: $GCP_JSON_KEY_FILE
+      entrypoint: /main
+      cmd: run
+      tag: latest,$WERCKER_GIT_COMMIT
+      ports: 8080/tcp
+      repository: us.gcr.io/myproject/sample
+      registry: https://us.gcr.io/v2
+deploy:
+  box: blueoceans/cloud-sdk
+  steps:
+  - bigtruedata/gcloud-auth-service-account:
+      key: $GCP_JSON_KEY_FILE
+  - bigtruedata/gcloud-config-set:
+      project: myproject
+      compute-region: us-west1
+  - script:
+      name: restarts instances in a managed instance group on Google Compute Engine
+      code: |-
+        gcloud alpha compute instance-groups managed rolling-action restart \
+        --max-unavailable 3 \
+        --region us-west1 \
+        $GCE_INSTANCE_GROUP_NAME
+gce:
+  box: blueoceans/cloud-sdk
+  steps:
+  - script:
+      name: create GCP JSON key file
+      code: |-
+        echo "$GCP_JSON_KEY_FILE" > key.json
+  - bigtruedata/gcloud-auth-service-account
+  - bigtruedata/gcloud-config-set:
+      project: myproject
+      compute-region: us-west1
+  - script:
+      name: create a Compute Engine virtual machine instance template to Google Compute Engine
+      code: |-
+        if [ `git log -1 --pretty=%H cloud-config.yml` = $WERCKER_GIT_COMMIT ]; then
+        gcloud compute instance-templates create --image-family cos-stable --image-project cos-cloud --machine-type f1-micro --metadata-from-file user-data=cloud-config.yml --scopes="cloud-platform" --tags="http-server" sample-$WERCKER_GIT_BRANCH-${WERCKER_GIT_COMMIT:0:7}
+        fi
